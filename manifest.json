@@ -1,0 +1,54 @@
+{
+    "manifest_version": 3,
+    "name": "Language Reactor - Copy Translation",
+    "version": "1.0",
+    "description": "Language Reactorの翻訳テキストを右クリックまたはホバーボタンでコピーできる拡張機能",
+    "permissions": [
+        "contextMenus",
+        "clipboardWrite",
+        "activeTab",
+        "scripting"
+    ],
+    "host_permissions": [
+        "https://www.netflix.com/*",
+        "https://www.youtube.com/*",
+        "https://www.amazon.co.jp/*",
+        "https://www.amazon.com/*",
+        "*://*/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.netflix.com/*",
+                "https://www.youtube.com/*",
+                "https://www.amazon.co.jp/*",
+                "https://www.amazon.com/*",
+                "*://*/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "css": [
+                "content.css"
+            ],
+            "run_at": "document_idle",
+            "all_frames": true
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icon16.png",
+            "48": "icon48.png",
+            "128": "icon128.png"
+        }
+    },
+    "icons": {
+        "16": "icon16.png",
+        "48": "icon48.png",
+        "128": "icon128.png"
+    }
+}

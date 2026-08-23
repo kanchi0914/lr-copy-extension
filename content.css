@@ -1,0 +1,82 @@
+/* Language Reactor Copy Extension - content styles */
+
+/* ── コピーボタン ───────────────────────────── */
+.lr-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.15s, transform 0.1s;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.lr-copy-btn svg {
+    width: 13px;
+    height: 13px;
+    pointer-events: none;
+}
+
+/* 親要素ホバー時にボタンを表示 */
+*:hover>.lr-copy-btn,
+.translationText:hover .lr-copy-btn,
+[class*="translationText"]:hover .lr-copy-btn,
+.ln-whole-title-translation:hover .lr-copy-btn,
+.react-draggable:hover .lr-copy-btn {
+    opacity: 1;
+}
+
+.lr-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.35) !important;
+    transform: scale(1.1);
+}
+
+.lr-copy-btn--copied {
+    background: rgba(72, 199, 116, 0.5) !important;
+    border-color: #48c774 !important;
+    opacity: 1 !important;
+}
+
+/* ── トースト通知 ─────────────────────────── */
+#lr-copy-toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 10, 10, 0.9);
+    color: #fff;
+    padding: 10px 22px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    z-index: 2147483647;
+    pointer-events: none;
+    max-width: 520px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    animation: lr-fadein 0.2s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@keyframes lr-fadein {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
