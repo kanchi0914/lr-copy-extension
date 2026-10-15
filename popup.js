@@ -1,10 +1,10 @@
-document.getElementById('copyBtn').addEventListener('click', async () => {
+async function handleCopy(order) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return;
 
     const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: () => {
+        func: (orderArg) => {
             // Amazon Prime Video: react-draggable 内の全字幕行をまとめて返す
             const draggable = document.querySelector('.react-draggable');
             if (draggable) {
@@ -34,7 +34,10 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
             }
             
             if (translationEl) {
-                let translationText = translationEl.textContent.trim();
+                const cloneForText = translationEl.cloneNode(true);
+                cloneForText.querySelectorAll('.lr-copy-btn-container, .lr-copy-btn').forEach(btn => btn.remove());
+                cloneForText.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+                let translationText = cloneForText.textContent.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
                 let originalText = '';
                 try {
                     const container = translationEl.closest('.lln-subs-wrap, .lln-subs-font-adjust, .lln-vertical-view, .lln-subtitle, .ln-bottom-panel, [data-index]') || translationEl.parentElement?.parentElement;
@@ -46,7 +49,7 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
                                 let combinedOrig = '';
                                 origEls.forEach(el => {
                                     const clone = el.cloneNode(true);
-                                    clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
+                                    clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn-container, .lr-copy-btn, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
                                     combinedOrig += clone.textContent + ' ';
                                 });
                                 originalText = combinedOrig.replace(/\s+/g, ' ').trim();
@@ -61,12 +64,13 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
                 }
                 
                 if (originalText && originalText !== translationText) {
-                    return originalText + '\n' + translationText;
+                    return orderArg === 'orig-trans' ? originalText + '\n' + translationText : translationText + '\n' + originalText;
                 }
                 return translationText;
             }
             return null;
-        }
+        },
+        args: [order]
     });
 
     const text = results?.[0]?.result;
@@ -81,4 +85,7 @@ document.getElementById('copyBtn').addEventListener('click', async () => {
         resultEl.textContent = '翻訳テキストが見つかりませんでした';
         setTimeout(() => { resultEl.textContent = ''; resultEl.style.color = '#6ee7b7'; }, 2500);
     }
-});
+}
+
+document.getElementById('copyBtnOrigTrans').addEventListener('click', () => handleCopy('orig-trans'));
+document.getElementById('copyBtnTransOrig').addEventListener('click', () => handleCopy('trans-orig'));

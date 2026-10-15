@@ -1,25 +1,33 @@
+importScripts('capture.js');
+
 // 右クリックコンテキストメニューの作成
 chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({
-        id: "copy-lr-translation",
-        title: "翻訳テキストをコピー",
+        id: "copy-lr-orig-trans",
+        title: "原文→翻訳の順でコピー",
+        contexts: ["all"]
+    });
+    chrome.contextMenus.create({
+        id: "copy-lr-trans-orig",
+        title: "翻訳→原文の順でコピー",
         contexts: ["all"]
     });
 });
 
 // コンテキストメニューがクリックされたとき
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-    if (info.menuItemId === "copy-lr-translation") {
+    if (info.menuItemId === "copy-lr-orig-trans" || info.menuItemId === "copy-lr-trans-orig") {
+        const order = info.menuItemId === "copy-lr-orig-trans" ? 'orig-trans' : 'trans-orig';
         chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: copyNearestTranslation,
-            args: []
+            args: [order]
         });
     }
 });
 
 // ページ上で最も近い翻訳テキストを探してコピーする関数
-function copyNearestTranslation() {
+function copyNearestTranslation(orderArg) {
     let text = null;
 
     // Amazon Prime Video: react-draggable 内の全字幕行をまとめてコピー
@@ -62,7 +70,10 @@ function copyNearestTranslation() {
     }
 
     if (translationEl && !text) {
-        let translationText = translationEl.textContent.trim();
+        const cloneForText = translationEl.cloneNode(true);
+        cloneForText.querySelectorAll('.lr-copy-btn').forEach(btn => btn.remove());
+        cloneForText.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        let translationText = cloneForText.textContent.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
         let originalText = '';
         
         try {
@@ -75,7 +86,7 @@ function copyNearestTranslation() {
                         let combinedOrig = '';
                         origEls.forEach(el => {
                             const clone = el.cloneNode(true);
-                            clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
+                            clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn-container, .lr-copy-btn, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
                             combinedOrig += clone.textContent + ' ';
                         });
                         originalText = combinedOrig.replace(/\s+/g, ' ').trim();
@@ -90,7 +101,7 @@ function copyNearestTranslation() {
         }
         
         if (originalText && originalText !== translationText) {
-            text = originalText + '\n' + translationText;
+            text = orderArg === 'orig-trans' ? originalText + '\n' + translationText : translationText + '\n' + originalText;
         } else {
             text = translationText;
         }

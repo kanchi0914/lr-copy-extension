@@ -36,19 +36,33 @@ function addCopyButton(el) {
         if (style.position === 'static') parent.style.position = 'relative';
     }
 
-    const btn = document.createElement('button');
-    btn.className = 'lr-copy-btn';
-    btn.title = '翻訳をコピー';
-    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    const btnContainer = document.createElement('div');
+    btnContainer.className = 'lr-copy-btn-container';
+
+    // 共通のSVGアイコン
+    const copySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
   </svg>`;
 
-    btn.addEventListener('click', (e) => {
+    const btnOrigTrans = document.createElement('button');
+    btnOrigTrans.className = 'lr-copy-btn';
+    btnOrigTrans.title = '原文→翻訳の順でコピー';
+    btnOrigTrans.innerHTML = `原→訳 ${copySvg}`;
+
+    const btnTransOrig = document.createElement('button');
+    btnTransOrig.className = 'lr-copy-btn';
+    btnTransOrig.title = '翻訳→原文の順でコピー';
+    btnTransOrig.innerHTML = `訳→原 ${copySvg}`;
+
+    const createClickHandler = (order, btnNode) => (e) => {
         e.stopPropagation();
         e.preventDefault();
         
-        let text = el.textContent.trim();
+        const cloneForText = el.cloneNode(true);
+        cloneForText.querySelectorAll('.lr-copy-btn-container').forEach(btn => btn.remove());
+        cloneForText.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        let text = cloneForText.textContent.split('\n').map(l => l.trim()).filter(Boolean).join('\n');
         
         try {
             const container = el.closest('.lln-subs-wrap, .lln-subs-font-adjust, .lln-vertical-view, .lln-subtitle, .ln-bottom-panel, .react-draggable, [data-index]') || el.parentElement?.parentElement;
@@ -62,7 +76,7 @@ function addCopyButton(el) {
                         origEls.forEach(origEl => {
                             const clone = origEl.cloneNode(true);
                             // 翻訳テキスト、コピーボタン、辞書ツールチップ(.tt)、保存ボタンなどを削除して純粋な原文だけにする
-                            clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
+                            clone.querySelectorAll('.translationText, [class*="translation"], .ln-subtitle-translation, .ln-whole-title-translation, .lr-copy-btn-container, .tt, .lln-star-and-menu-buttons').forEach(n => n.remove());
                             combinedOrig += clone.textContent + ' ';
                         });
                         originalText = combinedOrig.replace(/\s+/g, ' ').trim();
@@ -72,12 +86,12 @@ function addCopyButton(el) {
                     }
                 }
                 if (originalText && originalText !== text) {
-                    text = originalText + '\n' + text;
+                    text = order === 'orig-trans' ? originalText + '\n' + text : text + '\n' + originalText;
                 }
             } else if (container && container.classList.contains('react-draggable')) {
                  const spans = container.querySelectorAll('.MuiBox-root > span.MuiBox-root');
                  if (spans.length > 0) {
-                     const lines = Array.from(spans).map(s => s.textContent.trim()).filter(l => l && !l.includes('翻訳をコピー'));
+                     const lines = Array.from(spans).map(s => s.textContent.trim()).filter(l => l && !l.includes('翻訳をコピー') && !l.includes('原→訳') && !l.includes('訳→原'));
                      if (lines.length) text = lines.join('\n');
                  }
             }
@@ -87,8 +101,8 @@ function addCopyButton(el) {
 
         navigator.clipboard.writeText(text).then(() => {
             showToast('✓ コピー: ' + text.substring(0, 50) + (text.length > 50 ? '…' : ''));
-            btn.classList.add('lr-copy-btn--copied');
-            setTimeout(() => btn.classList.remove('lr-copy-btn--copied'), 1500);
+            btnNode.classList.add('lr-copy-btn--copied');
+            setTimeout(() => btnNode.classList.remove('lr-copy-btn--copied'), 1500);
         }).catch(() => {
             // clipboard API が使えない場合のフォールバック
             if (document.body) {
@@ -103,9 +117,14 @@ function addCopyButton(el) {
             }
             showToast('✓ コピー: ' + text.substring(0, 50) + (text.length > 50 ? '…' : ''));
         });
-    });
+    };
 
-    el.appendChild(btn);
+    btnOrigTrans.addEventListener('click', createClickHandler('orig-trans', btnOrigTrans));
+    btnTransOrig.addEventListener('click', createClickHandler('trans-orig', btnTransOrig));
+
+    btnContainer.appendChild(btnOrigTrans);
+    btnContainer.appendChild(btnTransOrig);
+    el.appendChild(btnContainer);
 }
 
 function showToast(msg) {

@@ -1,49 +1,56 @@
 /* Language Reactor Copy Extension - content styles */
 
 /* ── コピーボタン ───────────────────────────── */
+.lr-copy-btn-container {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
 .lr-copy-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
-    padding: 3px;
-    margin-left: 6px;
-    vertical-align: middle;
+    padding: 3px 6px;
     background: rgba(255, 255, 255, 0.15);
     border: 1px solid rgba(255, 255, 255, 0.35);
     border-radius: 5px;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.2s, background 0.15s, transform 0.1s;
+    transition: background 0.15s, transform 0.1s;
     color: #fff;
     flex-shrink: 0;
+    font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
 }
 
 .lr-copy-btn svg {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
+    margin-left: 3px;
     pointer-events: none;
 }
 
 /* 親要素ホバー時にボタンを表示 */
-*:hover>.lr-copy-btn,
-.translationText:hover .lr-copy-btn,
-[class*="translationText"]:hover .lr-copy-btn,
-.ln-whole-title-translation:hover .lr-copy-btn,
-.react-draggable:hover .lr-copy-btn {
+*:hover>.lr-copy-btn-container,
+.translationText:hover .lr-copy-btn-container,
+[class*="translationText"]:hover .lr-copy-btn-container,
+.ln-whole-title-translation:hover .lr-copy-btn-container,
+.react-draggable:hover .lr-copy-btn-container {
     opacity: 1;
 }
 
 .lr-copy-btn:hover {
     background: rgba(255, 255, 255, 0.35) !important;
-    transform: scale(1.1);
+    transform: scale(1.05);
 }
 
 .lr-copy-btn--copied {
     background: rgba(72, 199, 116, 0.5) !important;
     border-color: #48c774 !important;
-    opacity: 1 !important;
 }
 
 /* ── トースト通知 ─────────────────────────── */
@@ -79,4 +86,36 @@
         opacity: 1;
         transform: translateX(-50%) translateY(0);
     }
+}
+
+/* ===== キャプチャ (検証用) ===== */
+#lr-capture-btn {
+    position: fixed;
+    top: 120px;
+    left: 16px;
+    z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+#lr-capture-btn:hover {
+    background: rgba(99, 102, 241, 0.8);
+}
+
+#lr-capture-toast {
+    position: fixed;
+    top: 170px;
+    left: 16px;
+    z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    pointer-events: none;
 }
