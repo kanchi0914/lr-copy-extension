@@ -21,12 +21,30 @@
     clipBtn.textContent = '🎬';
     clipBtn.title = '今の字幕を録画 (スクショ・字幕と一緒に保存)';
 
+    const starBtn = document.createElement('button');
+    starBtn.id = 'lr-star-btn';
+    starBtn.textContent = '⭐';
+    starBtn.title = 'Language Reactor で★を付けた字幕をまとめて保存 (Shift+クリックで録画も)。実行中に押すと中止';
+
+    const buttons = [btn, clipBtn, starBtn];
+
     function showCaptureToast(msg, duration = 2500) {
         const toast = document.createElement('div');
-        toast.id = 'lr-capture-toast';
+        toast.className = 'lr-capture-toast';
         toast.textContent = msg;
         (document.fullscreenElement || document.body).appendChild(toast);
         setTimeout(() => toast.remove(), duration);
+    }
+
+    // 撮影の前に自分の UI (ボタン・トースト) を隠し、再描画されるのを待つ
+    async function hideUi() {
+        buttons.forEach((b) => (b.style.visibility = 'hidden'));
+        document.querySelectorAll('.lr-capture-toast').forEach((t) => t.remove());
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }
+
+    function showUi() {
+        buttons.forEach((b) => (b.style.visibility = ''));
     }
 
     // ---------- 字幕の取り出し ----------
@@ -115,6 +133,7 @@
     const CLIP_AUDIO_BITRATE = 160000; // ステレオの Opus
     let clipStream = null;
     let clipping = false;
+    let lastError = ''; // 直近の失敗理由 (まとめて保存の結果表示用)
 
     async function getClipStream() {
         if (clipStream && clipStream.getVideoTracks().some((t) => t.readyState === 'live')) return clipStream;
@@ -167,25 +186,25 @@
         });
     }
 
-    async function recordClip() {
-        if (clipping) return;
+    /** 今の字幕を録画して保存する。成功したら true (quiet: 結果のトーストを出さない) */
+    async function recordClip({ quiet = false } = {}) {
+        if (clipping) return false;
         const subs = document.getElementById('lln-subs');
         const replay = subs?.querySelector('.lln-subs-replay-btn');
         const video = document.querySelector('video');
         if (!subs || !replay || !video || !sentenceText(subs)) {
+            lastError = `録画できる字幕がありません (${!subs ? '字幕なし' : !replay ? 'リプレイボタンなし' : !video ? '動画なし' : '字幕が空'})`;
             showCaptureToast('字幕が表示されていません (Language Reactor の字幕が出ている場面で押してください)', 4000);
-            return;
+            return false;
         }
         clipping = true;
         const index = subs.dataset.index;
         const info = captureInfo(); // 録画が終わる頃には次の字幕に変わっているので先に取る
-        const buttons = [btn, clipBtn];
         try {
             const stream = await getClipStream();
-            buttons.forEach((b) => (b.style.visibility = 'hidden'));
 
-            // スクショも録画の前に撮る (ボタンが消えた状態で再描画されるのを待ってから)
-            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            // スクショも録画の前に撮る
+            await hideUi();
             const shot = await chrome.runtime.sendMessage({ type: 'LR_SCREENSHOT' });
             if (!shot?.ok) throw new Error(`スクショ失敗: ${shot?.error}`);
 
@@ -222,11 +241,16 @@
             const webm = await blobToDataUrl(blob);
             const res = await chrome.runtime.sendMessage({ type: 'LR_CAPTURE', info, media: { png: shot.png, webm } });
             if (!res?.ok) throw new Error(`保存失敗: ${res?.error}`);
-            showCaptureToast(`録画を保存: ${info.line.text.slice(0, 30)} / ${seconds}秒 / ${Math.round(blob.size / 1024)}KB / ${settings.width}x${settings.height} / ${audioInfo(stream)}`, 6000);
+            if (!quiet) {
+                showCaptureToast(`録画を保存: ${info.line.text.slice(0, 30)} / ${seconds}秒 / ${Math.round(blob.size / 1024)}KB / ${settings.width}x${settings.height} / ${audioInfo(stream)}`, 6000);
+            }
+            return true;
         } catch (e) {
+            lastError = `録画失敗: ${e.message}`;
             showCaptureToast(`録画失敗: ${e.name}: ${e.message}`, 6000);
+            return false;
         } finally {
-            buttons.forEach((b) => (b.style.visibility = ''));
+            showUi();
             clipping = false;
         }
     }
@@ -237,28 +261,168 @@
         recordClip();
     });
 
-    // ---------- ボタン ----------
+    // ---------- スクショ ----------
 
-    // ボタン自体が写り込まないよう隠して再描画を待ってから撮影を依頼する
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
+    /** 今の字幕のスクショを保存する。成功したら true (quiet: 結果のトーストを出さない) */
+    async function captureScreenshot({ quiet = false } = {}) {
         const info = captureInfo();
         if (!info) {
             showCaptureToast('字幕が表示されていません (Language Reactor の字幕が出ている場面で押してください)');
+            return false;
+        }
+        await hideUi();
+        try {
+            const res = await chrome.runtime.sendMessage({ type: 'LR_CAPTURE', info });
+            if (!res?.ok) throw new Error(res?.error ?? 'no response');
+            if (!quiet) showCaptureToast(`保存しました: ${info.line.text.slice(0, 40)}`);
+            return true;
+        } catch (e) {
+            lastError = `保存失敗: ${e.message}`;
+            showCaptureToast(`保存失敗: ${e.message}`);
+            return false;
+        } finally {
+            showUi();
+        }
+    }
+
+    // ---------- ★をまとめて保存 ----------
+    // 右パネルは見えている行しか中身がないので、スクロールしながら★の付いた行の番号を集め、
+    // 1 件ずつパネルの再生ボタンでその字幕に移動して保存する (Netflix は再生位置を直接変えられない)
+    let batchRunning = false;
+    let batchCancel = false;
+
+    function panel() {
+        return document.getElementById('lln-vertical-view-subs');
+    }
+
+    async function collectStarred() {
+        const box = panel();
+        const found = new Set();
+        const saved = box.scrollTop;
+        box.style.scrollBehavior = 'auto'; // smooth のままだとスクロールが追いつかない
+        const step = Math.max(100, box.clientHeight * 0.8);
+        for (let top = 0; ; top += step) {
+            box.scrollTop = top;
+            await sleep(150);
+            box.querySelectorAll('.lln-vertical-view-sub .lln-star-sub-btn.active').forEach((star) => {
+                const i = star.closest('.lln-vertical-view-sub')?.dataset.index;
+                if (i !== undefined) found.add(Number(i));
+            });
+            if (top + box.clientHeight >= box.scrollHeight) break;
+        }
+        box.scrollTop = saved;
+        box.style.scrollBehavior = '';
+        return [...found].sort((a, b) => a - b);
+    }
+
+    async function goToSub(index) {
+        const box = panel();
+        const item = box.querySelector(`.lln-vertical-view-sub[data-index="${index}"]`);
+        if (!item) return false;
+        box.style.scrollBehavior = 'auto';
+        box.scrollTop = parseFloat(item.style.top || '0') - box.clientHeight / 3;
+        box.style.scrollBehavior = '';
+        await sleep(200); // スクロールした先の行に中身が入るのを待つ
+        const play = item.querySelector('.lln-sub-play-btn');
+        if (!play) return false;
+        play.click();
+        return waitFor(() => {
+            const subs = document.getElementById('lln-subs');
+            return subs?.dataset.index === String(index) && !!sentenceText(subs);
+        }, 6000);
+    }
+
+    async function captureStarred(withClip) {
+        if (batchRunning) {
+            batchCancel = true;
+            showCaptureToast('中止します (今の 1 件が終わったら止まります)');
             return;
         }
-        btn.style.visibility = 'hidden';
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            chrome.runtime.sendMessage({ type: 'LR_CAPTURE', info }, (res) => {
-                btn.style.visibility = '';
-                if (chrome.runtime.lastError || !res?.ok) {
-                    showCaptureToast(`保存失敗: ${chrome.runtime.lastError?.message ?? res?.error ?? 'no response'}`);
-                    return;
+        if (!panel()) {
+            showCaptureToast('Language Reactor の右側の字幕パネルを開いてください', 4000);
+            return;
+        }
+        batchRunning = true;
+        batchCancel = false;
+        const failed = [];
+        let saved = 0;
+        let total = 0;
+        try {
+            if (withClip) await getClipStream(); // 画面共有の確認はクリック直後でないと出せないので最初に
+            document.querySelector('video')?.pause(); // パネルが再生位置に合わせて勝手にスクロールしないように
+            starBtn.textContent = '⏳';
+            const list = await collectStarred();
+            total = list.length;
+            if (!total) {
+                showCaptureToast('このエピソードに★の付いた字幕がありません', 4000);
+                return;
+            }
+            for (const [n, index] of list.entries()) {
+                if (batchCancel) break;
+                starBtn.textContent = `⏹${n + 1}/${total}`;
+                lastError = '';
+                if (!(await goToSub(index))) {
+                    failed.push({ index, reason: 'その字幕に移動できませんでした' });
+                    continue;
                 }
-                showCaptureToast(`保存しました: ${info.line.text.slice(0, 40)}`);
-            });
-        }));
+                let ok;
+                if (withClip) {
+                    // 移動の直後にリプレイで巻き戻すと無視されることがあるので、移動が終わって再生が始まるまで待つ
+                    const video = document.querySelector('video');
+                    await waitFor(() => video && !video.seeking && !video.paused && video.readyState >= 3, 5000);
+                    await sleep(500);
+                    ok = await recordClip({ quiet: true });
+                } else {
+                    await sleep(500); // 移動直後は映像が乱れることがあるので少し再生してから止める
+                    document.querySelector('video')?.pause();
+                    await sleep(300);
+                    ok = await captureScreenshot({ quiet: true });
+                }
+                if (ok) saved++;
+                else failed.push({ index, reason: lastError || '不明' });
+            }
+        } catch (e) {
+            showCaptureToast(`まとめて保存に失敗: ${e.name}: ${e.message}`, 6000);
+        } finally {
+            starBtn.textContent = '⭐';
+            batchRunning = false;
+        }
+        if (failed.length) console.warn('[LR capture] ★まとめて保存の失敗', failed);
+        if (total) {
+            showCaptureToast(
+                `★ ${saved}/${total} 件を保存しました${batchCancel ? ' (中止)' : ''}` +
+                (failed.length ? ` / 失敗: ${failed.length} 件 (例: ${failed[0].reason})` : ''),
+                8000,
+            );
+        }
+    }
+
+    starBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        captureStarred(e.shiftKey);
+    });
+
+    // ---------- ボタン ----------
+
+    // 調査用: Alt+クリックで、script / style / svg などを除いたページの HTML を保存する
+    function dumpHtml() {
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('script, style, svg, link, noscript, video').forEach((n) => n.remove());
+        const html = `<!-- ${location.href} -->\n` + clone.outerHTML;
+        chrome.runtime.sendMessage({ type: 'LR_DUMP_HTML', html }, (res) => {
+            showCaptureToast(res?.ok ? 'HTML を保存しました (eng-captures-test)' : `保存失敗: ${chrome.runtime.lastError?.message ?? res?.error}`);
+        });
+    }
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (e.altKey) {
+            dumpHtml();
+            return;
+        }
+        captureScreenshot();
     });
 
     // 再生画面 (/watch/) のときだけ表示。全画面中は全画面の要素の中に置かないと見えない
@@ -266,13 +430,13 @@
         const onWatch = location.pathname.startsWith('/watch');
         const parent = document.fullscreenElement || document.body;
         if (!onWatch) {
-            btn.remove();
-            clipBtn.remove();
+            buttons.forEach((b) => b.remove());
             lastTitle = '';
             return;
         }
-        if (parent && btn.parentElement !== parent) parent.appendChild(btn);
-        if (parent && clipBtn.parentElement !== parent) parent.appendChild(clipBtn);
+        buttons.forEach((b) => {
+            if (parent && b.parentElement !== parent) parent.appendChild(b);
+        });
         readTitle(); // タイトルは操作 UI が出ている間しか DOM にないので、見えたときに覚えておく
     }
 

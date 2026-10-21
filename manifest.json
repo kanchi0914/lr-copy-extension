@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "Language Reactor - Copy Translation",
+    "name": "EngSite Capture (Language Reactor)",
     "version": "1.0",
-    "description": "Language Reactorの翻訳テキストを右クリックまたはホバーボタンでコピーできる拡張機能",
+    "description": "Language Reactor の字幕・翻訳のコピーと、スクショ・録画・★を付けた字幕のまとめて保存 (英語学習サイト EngSite の Inbox 用)",
     "permissions": [
         "contextMenus",
         "clipboardWrite",

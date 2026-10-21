@@ -117,14 +117,29 @@
     cursor: pointer;
 }
 
+#lr-star-btn {
+    position: fixed;
+    top: 220px;
+    left: 16px;
+    z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+#lr-star-btn:hover,
 #lr-clip-btn:hover,
 #lr-capture-btn:hover {
     background: rgba(99, 102, 241, 0.8);
 }
 
-#lr-capture-toast {
+.lr-capture-toast {
     position: fixed;
-    top: 220px;
+    top: 270px;
     left: 16px;
     z-index: 2147483647;
     background: rgba(0, 0, 0, 0.85);

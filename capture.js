@@ -58,6 +58,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             .catch((e) => sendResponse({ ok: false, error: e.message }));
         return true; // async response
     }
+    if (msg.type === 'LR_DUMP_HTML') {
+        // 調査用: ページの HTML を Downloads/eng-captures-test/ に保存する
+        chrome.downloads.download({
+            url: 'data:text/html;charset=utf-8,' + encodeURIComponent(msg.html),
+            filename: `eng-captures-test/page_${captureTimestamp(new Date())}.html`,
+        })
+            .then(() => sendResponse({ ok: true }))
+            .catch((e) => sendResponse({ ok: false, error: e.message }));
+        return true; // async response
+    }
     if (msg.type === 'LR_SCREENSHOT') {
         // 録画の前に撮っておくスクショ (保存は録画と一緒に LR_CAPTURE で行う)
         chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' })
