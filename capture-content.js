@@ -127,6 +127,11 @@
     // 「字幕をもう一度再生」ボタンで字幕の頭に戻し、字幕が次に変わるまでタブを録画する。
     // タブの映像は画面共有 (getDisplayMedia) で取る。確認ダイアログはページを開いて最初の 1 回だけ
     const CLIP_TAIL_MS = 300;
+    const CLIP_SETTLE_MS = 400; // 止めてから、遅れて届く映像が止まった画面になるまで待つ時間
+    const REPLAY_TRIES = 3;
+    const REPLAY_WAIT_MS = 1000; // リプレイ 1 回につき、シークの完了を待つ時間
+    const REPLAY_NUDGE_MS = 200; // やり直す前に再生を進める時間
+    const GOTO_WAIT_MS = 1500; // パネルから移動したとき、シークの完了を待つ時間
     const CLIP_MAX_MS = 15000;
     const CLIP_MAX_WIDTH = 1280;
     const CLIP_BITRATE = 2500000;
@@ -134,6 +139,7 @@
     let clipStream = null;
     let clipping = false;
     let lastError = ''; // 直近の失敗理由 (まとめて保存の結果表示用)
+    let rewindStats = { stale: 0, misses: 0 }; // 巻き戻しの経過 (まとめて保存の結果表示用)
 
     async function getClipStream() {
         if (clipStream && clipStream.getVideoTracks().some((t) => t.readyState === 'live')) return clipStream;
@@ -169,6 +175,20 @@
         });
     }
 
+    /** 呼んだ後に起きるシークの完了を待つ。時間内に完了したら true (シークを起こす操作の前に呼ぶ) */
+    function seekedWithin(video, timeoutMs) {
+        return new Promise((resolve) => {
+            const finish = (ok) => {
+                clearTimeout(timer);
+                video.removeEventListener('seeked', onSeeked);
+                resolve(ok);
+            };
+            const onSeeked = () => finish(true);
+            const timer = setTimeout(() => finish(false), timeoutMs);
+            video.addEventListener('seeked', onSeeked);
+        });
+    }
+
     // 実際に使われた音声の設定 (通話向けの処理が切れているかの確認用)
     function audioInfo(stream) {
         const a = stream.getAudioTracks()[0]?.getSettings();
@@ -184,6 +204,57 @@
             reader.onerror = reject;
             reader.readAsDataURL(blob);
         });
+    }
+
+    /**
+     * 字幕の頭に戻るボタンを押す直前に取り直す。#lln-subs は字幕が変わると作り直され、
+     * 古い要素を押しても何も起きない。字幕が切り替わった後なら右パネルの再生ボタンを使う
+     */
+    async function rewindButton(index) {
+        const subs = document.getElementById('lln-subs');
+        if (subs?.dataset.index !== index) return panelPlayBtn(index);
+        return subs.querySelector('.lln-subs-replay-btn') ?? panelPlayBtn(index);
+    }
+
+    /**
+     * 字幕の頭に戻す。シークが起きなければやり直し、経過をコンソールに残す。
+     * 画面共有の映像は少し遅れて届くので、戻す前に止めて待つ。再生したまま戻すと、
+     * 戻す直前の映像が録画の頭に入り、字幕の頭が二重に再生されたように見える
+     */
+    async function rewindToSub(video, index, firstReplay) {
+        const log = [];
+        for (let n = 1; n <= REPLAY_TRIES; n++) {
+            video.pause();
+            await sleep(CLIP_SETTLE_MS);
+
+            const button = await rewindButton(index);
+            const stale = !firstReplay.isConnected; // 録画の開始時に取ったボタンが無効になっていたか
+            if (n === 1 && stale) rewindStats.stale++;
+            log.push({
+                n,
+                stale,
+                button: !button ? 'なし' : button.matches('.lln-subs-replay-btn') ? 'リプレイ' : 'パネル',
+                subs: document.getElementById('lln-subs')?.dataset.index ?? 'なし',
+                position: video.currentTime,
+                seeking: video.seeking,
+            });
+
+            const seeked = seekedWithin(video, REPLAY_WAIT_MS);
+            button?.click();
+            if (await seeked) {
+                if (n > 1 || stale) console.warn('[LR capture] 巻き戻しの経過', index, log);
+                return;
+            }
+            rewindStats.misses++;
+
+            // 止めた位置が字幕の頭と同じだと無視されることがあるので、少し進めてからやり直す
+            if (video.paused) {
+                await video.play().catch(() => {});
+                await sleep(REPLAY_NUDGE_MS);
+            }
+        }
+        console.warn('[LR capture] 巻き戻しの経過', index, log);
+        throw new Error(`リプレイボタンで巻き戻せませんでした (${REPLAY_TRIES} 回試行)`);
     }
 
     /** 今の字幕を録画して保存する。成功したら true (quiet: 結果のトーストを出さない) */
@@ -217,10 +288,8 @@
             recorder.start();
             recorder.pause(); // 字幕の頭に戻るまでは録らない
 
-            const seeked = new Promise((resolve) => video.addEventListener('seeked', resolve, { once: true }));
-            replay.click();
-            const ok = await Promise.race([seeked.then(() => true), sleep(3000).then(() => false)]);
-            if (!ok) throw new Error('リプレイボタンで巻き戻せませんでした');
+            await rewindToSub(video, index, replay);
+            if (video.paused) await video.play().catch(() => {}); // リプレイで再生が始まらなかったとき
             await waitFor(() => !video.paused, 3000);
             recorder.resume();
             const t0 = performance.now();
@@ -315,21 +384,30 @@
         return [...found].sort((a, b) => a - b);
     }
 
-    async function goToSub(index) {
+    /** 右パネルの字幕の再生ボタン。パネルが閉じているか、その行がなければ null */
+    async function panelPlayBtn(index) {
         const box = panel();
-        const item = box.querySelector(`.lln-vertical-view-sub[data-index="${index}"]`);
-        if (!item) return false;
+        const item = box?.querySelector(`.lln-vertical-view-sub[data-index="${index}"]`);
+        if (!item) return null;
         box.style.scrollBehavior = 'auto';
         box.scrollTop = parseFloat(item.style.top || '0') - box.clientHeight / 3;
         box.style.scrollBehavior = '';
         await sleep(200); // スクロールした先の行に中身が入るのを待つ
-        const play = item.querySelector('.lln-sub-play-btn');
-        if (!play) return false;
+        return item.querySelector('.lln-sub-play-btn');
+    }
+
+    async function goToSub(index) {
+        const video = document.querySelector('video');
+        const play = await panelPlayBtn(index);
+        if (!video || !play) return false;
+        const seeked = seekedWithin(video, GOTO_WAIT_MS);
         play.click();
-        return waitFor(() => {
+        const shown = await waitFor(() => {
             const subs = document.getElementById('lln-subs');
             return subs?.dataset.index === String(index) && !!sentenceText(subs);
         }, 6000);
+        await seeked; // 字幕の表示はシークより先に変わるので、シークの完了も待つ (時間切れでも続ける)
+        return shown;
     }
 
     async function captureStarred(withClip) {
@@ -344,6 +422,7 @@
         }
         batchRunning = true;
         batchCancel = false;
+        rewindStats = { stale: 0, misses: 0 };
         const failed = [];
         let saved = 0;
         let total = 0;
@@ -367,10 +446,12 @@
                 }
                 let ok;
                 if (withClip) {
-                    // 移動の直後にリプレイで巻き戻すと無視されることがあるので、移動が終わって再生が始まるまで待つ
+                    // 移動の直後に止めてリプレイで巻き戻すと無視されることがあるので、移動が終わって再生が進むまで待つ
                     const video = document.querySelector('video');
-                    await waitFor(() => video && !video.seeking && !video.paused && video.readyState >= 3, 5000);
-                    await sleep(500);
+                    await waitFor(() => !video.seeking && video.readyState >= 3, 5000);
+                    if (video.paused) await video.play().catch(() => {}); // 移動で再生が始まらなかったとき
+                    const start = video.currentTime;
+                    await waitFor(() => video.currentTime > start + 0.05, 1500);
                     ok = await recordClip({ quiet: true });
                 } else {
                     await sleep(500); // 移動直後は映像が乱れることがあるので少し再生してから止める
@@ -391,7 +472,8 @@
         if (total) {
             showCaptureToast(
                 `★ ${saved}/${total} 件を保存しました${batchCancel ? ' (中止)' : ''}` +
-                (failed.length ? ` / 失敗: ${failed.length} 件 (例: ${failed[0].reason})` : ''),
+                (failed.length ? ` / 失敗: ${failed.length} 件 (例: ${failed[0].reason})` : '') +
+                (rewindStats.misses || rewindStats.stale ? ` / 巻き戻し 空振り: ${rewindStats.misses} 回, 無効なボタン: ${rewindStats.stale} 回` : ''),
                 8000,
             );
         }
